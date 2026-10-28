@@ -1,0 +1,11 @@
+[package]
+name = "sdp-star"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "SDP*: an interior-point solver for semidefinite programs on a chordal star graph"
+keywords = ["sdp", "semidefinite", "optimization", "interior-point", "chordal"]
+categories = ["mathematics", "science"]
+
+[dependencies]
+nalgebra = "0.33"
