@@ -7,7 +7,7 @@ fn con(matrix: Vec<(usize, usize, f64)>, rhs: f64) -> Constraint {
     Constraint { matrix, rhs }
 }
 
-/// The dual point is feasible: S_i = C_i - Σ y A - Σ z E is PSD, matches the returned S_i,
+/// The dual point is feasible: S_i = C_i + Σ y A + Σ z E is PSD, matches the returned S_i,
 /// and the hub multipliers balance, Σ_i z_i = F^T v.
 fn check_dual(p: &StarSdp, sol: &sdp_star::Solution) {
     let pairs = hub_pairs(p.hub);
@@ -25,10 +25,10 @@ fn check_dual(p: &StarSdp, sol: &sdp_star::Solution) {
         };
         add(&cl.objective, 1.0);
         for (j, c) in cl.constraints.iter().enumerate() {
-            add(&c.matrix, -sol.y[i][j]);
+            add(&c.matrix, sol.y[i][j]);
         }
         for (k, &(a, b)) in pairs.iter().enumerate() {
-            add(&[(a, b, if a == b { 1.0 } else { 0.5 })], -sol.z[i][k]);
+            add(&[(a, b, if a == b { 1.0 } else { 0.5 })], sol.z[i][k]);
         }
         assert!((&s - &sol.s[i]).norm() < 1e-7, "clique {i}: S mismatch");
         assert!(

@@ -28,6 +28,10 @@
 //! * Indices are 0-based. The hub is indices `0..h` of every clique.
 //! * `U` is returned through its lower triangle, column by column: `(0,0), (1,0), …,
 //!   (h-1,0), (1,1), …, (h-1,h-1)`, see [`hub_pairs`].
+//! * Multipliers enter the Lagrangian with a plus sign: the dual slacks are
+//!   `S_i = C_i + Σ_j y_ij A_ij + Σ_k z_ik E_k` (`E_k` selects hub entry `k`), the hub
+//!   multipliers balance as `Σ_i z_i = F^T v`, and the dual objective is
+//!   `-Σ_ij b_ij y_ij - Σ_k f_k v_k`.
 //!
 //! # Example
 //!
@@ -155,7 +159,7 @@ pub struct Solution {
     pub status: Status,
     /// primal blocks `X_i`
     pub x: Vec<DMatrix<f64>>,
-    /// dual slacks `S_i = C_i - Σ_j y_ij A_ij - Σ_k z_ik E_k`
+    /// dual slacks `S_i = C_i + Σ_j y_ij A_ij + Σ_k z_ik E_k`
     pub s: Vec<DMatrix<f64>>,
     /// multipliers of each clique's local constraints, in input order (0 for removed ones)
     pub y: Vec<DVector<f64>>,
@@ -166,7 +170,7 @@ pub struct Solution {
     /// multipliers of the hub constraints
     pub v: DVector<f64>,
     pub primal_objective: f64,
-    /// `Σ_ij b_ij y_ij + Σ_k f_k v_k`: a lower bound on the optimum (weak duality)
+    /// `-Σ_ij b_ij y_ij - Σ_k f_k v_k`: a lower bound on the optimum (weak duality)
     pub dual_objective: f64,
     pub primal_infeasibility: f64,
     pub dual_infeasibility: f64,

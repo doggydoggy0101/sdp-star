@@ -27,9 +27,9 @@ struct Block {
     yz: DVector<f64>, // multipliers of [A; H]
     // residuals at the current point
     r: DVector<f64>,  // [b; u] - G(X)
-    rd: DMatrix<f64>, // C - G^*(yz) - S
+    rd: DMatrix<f64>, // C + G^*(yz) - S
     cx: f64,
-    by: f64,
+    by: f64, // -<b, y>
     xs: f64,
     rp2: f64,
     rh2: f64,
@@ -48,11 +48,11 @@ struct Block {
     khub: DMatrix<f64>, // E^T M^{-1} E, rotated
     zbuf: Vec<f64>,
     first: bool,
-    // right-hand sides (rotated): g = r - G(Q), ΔX = Q + W G^*(Δyz) W
+    // right-hand sides (rotated): g = G(Q) - r, ΔX = Q - W G^*(Δyz) W
     q: DMatrix<f64>,
     gv: DVector<f64>,
     t: DVector<f64>,
-    // corrector, split as Q = q0 + σμ S^{-1}, g = g0 - σμ g1
+    // corrector, split as Q = q0 + σμ S^{-1}, g = g0 + σμ g1
     q0: DMatrix<f64>,
     sinv: DMatrix<f64>,
     g0: DVector<f64>,
@@ -157,9 +157,9 @@ impl Block {
         rhs.rows_mut(0, ml).copy_from(&dt.b);
         rhs.rows_mut(ml, u.len()).copy_from(u);
         self.r = rhs - dt.apply(&self.x);
-        self.rd = &dt.c - dt.adjoint(&self.yz) - &self.s;
+        self.rd = &dt.c + dt.adjoint(&self.yz) - &self.s;
         self.cx = dt.c.dot(&self.x);
-        self.by = dt.b.dot(&self.yz.rows(0, ml));
+        self.by = -dt.b.dot(&self.yz.rows(0, ml));
         self.xs = self.x.dot(&self.s);
         self.rp2 = self.r.rows(0, ml).norm_squared() + dt.removed_residual2(&self.x);
         self.rh2 = self.r.rows(ml, u.len()).norm_squared();
@@ -270,7 +270,7 @@ impl Block {
 
         self.wrdw = self.wyw(&self.rd);
         self.q = -&self.x - &self.wrdw;
-        self.gv = self.rot(&self.r - self.dt.apply(&self.q));
+        self.gv = self.rot(self.dt.apply(&self.q) - &self.r);
         self.t = self.hub(&chol_solve(&self.l, &self.gv));
     }
 
@@ -280,11 +280,11 @@ impl Block {
         let ml = self.dt.ml;
         let mut rhs = self.gv.clone();
         let mut hub = rhs.rows_mut(ml, du.len());
-        hub += du;
+        hub -= du;
         self.dyz = self.rot(chol_solve(&self.l, &rhs));
         let gs = self.dt.adjoint(&self.dyz);
-        self.ds = &self.rd - &gs;
-        self.dx = &self.q + self.wyw(&gs);
+        self.ds = &self.rd + &gs;
+        self.dx = &self.q - self.wyw(&gs);
         self.dx_sc = &self.ginv * &self.dx * self.ginv.transpose();
         self.ds_sc = self.g.tr_mul(&self.ds) * &self.g;
         self.ax = max_step(&self.lam, &self.dx_sc);
@@ -314,7 +314,7 @@ impl Block {
             col /= lam[k];
         }
         self.sinv = &gl * self.g.transpose(); // S^{-1} = G Λ^{-1} G^T
-        self.g0 = self.rot(&self.r - self.dt.apply(&self.q0));
+        self.g0 = self.rot(self.dt.apply(&self.q0) - &self.r);
         self.g1 = self.rot(self.dt.apply(&self.sinv));
         self.t0 = self.hub(&chol_solve(&self.l, &self.g0));
         self.t1 = self.hub(&chol_solve(&self.l, &self.g1));
@@ -325,7 +325,7 @@ impl Block {
     /// eigenvalue bound alone can overshoot by round-off near the optimum; any smaller step
     /// stays inside, so the min over cliques does.
     fn phase_c(&mut self, du: &DVector<f64>, smu: f64, gamma: f64) {
-        self.gv = &self.g0 - &self.g1 * smu;
+        self.gv = &self.g0 + &self.g1 * smu;
         self.q = &self.q0 + &self.sinv * smu;
         self.direction(du);
         let safe = |m: &DMatrix<f64>, dm: &DMatrix<f64>, mut a: f64| {
@@ -429,7 +429,7 @@ pub(crate) fn solve(prob: &StarSdp, opt: &Options) -> Solution {
             ru -= b.hub(&b.yz);
         }
         let pobj = blocks.iter().map(|b| b.cx).sum::<f64>();
-        let dobj = blocks.iter().map(|b| b.by).sum::<f64>() + f.dot(&v);
+        let dobj = blocks.iter().map(|b| b.by).sum::<f64>() - f.dot(&v);
         let xs: f64 = blocks.iter().map(|b| b.xs).sum();
         let mu = xs / n_tot;
         // relative to the whole right-hand side [b_i; u]_i, f: u sits in every clique's
@@ -471,7 +471,7 @@ pub(crate) fn solve(prob: &StarSdp, opt: &Options) -> Solution {
         }
 
         // hub system in rotated coordinates (u = H u'):
-        // K Δu' - F'^T Δv = H ru - Σ t_i,  F' Δu' = rf,  F' = F H
+        // K Δu' + F'^T Δv = Σ t_i - H ru,  F' Δu' = rf,  F' = F H
         let mut fr = fm.clone();
         let fv = &fm * &hv;
         fr.ger(-2.0 / hv.norm_squared(), &fv, &hv, 1.0);
@@ -483,12 +483,12 @@ pub(crate) fn solve(prob: &StarSdp, opt: &Options) -> Solution {
             .fold(DMatrix::zeros(p, p), |acc, b| acc + &b.khub);
         let mut kkt = DMatrix::zeros(p + nq, p + nq);
         kkt.view_mut((0, 0), (p, p)).copy_from(&k);
-        kkt.view_mut((0, p), (p, nq)).copy_from(&(-fr.transpose()));
+        kkt.view_mut((0, p), (p, nq)).copy_from(&fr.transpose());
         kkt.view_mut((p, 0), (nq, p)).copy_from(&fr);
         let lu = kkt.lu();
         let hub_solve = |t: &DVector<f64>| {
             let mut rhs = DVector::zeros(p + nq);
-            rhs.rows_mut(0, p).copy_from(&(&rur - t));
+            rhs.rows_mut(0, p).copy_from(&(t - &rur));
             rhs.rows_mut(p, nq).copy_from(&rf);
             lu.solve(&rhs)
                 .map(|x| (x.rows(0, p).into_owned(), x.rows(p, nq).into_owned()))
@@ -513,7 +513,7 @@ pub(crate) fn solve(prob: &StarSdp, opt: &Options) -> Solution {
         // corrector
         let t0: DVector<f64> = blocks.iter().fold(DVector::zeros(p), |acc, b| acc + &b.t0);
         let t1: DVector<f64> = blocks.iter().fold(DVector::zeros(p), |acc, b| acc + &b.t1);
-        let Some((du, dv)) = hub_solve(&(t0 - t1 * (sigma * mu))) else {
+        let Some((du, dv)) = hub_solve(&(t0 + t1 * (sigma * mu))) else {
             failed = true;
             break;
         };

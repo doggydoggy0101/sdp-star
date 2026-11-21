@@ -38,6 +38,7 @@ Conventions:
 - Symmetric matrices are lower-triangle triplets `(row, col, value)` with `row >= col`; each triplet sets both `A[row, col]` and `A[col, row]`, so `<A, X> = X[1,0]` is `(1, 0, 0.5)`. Upper-triangle triplets are rejected.
 - Indices are 0-based, and the hub is indices `0..h` of every clique.
 - `U` and the hub multipliers are ordered column by column of the lower triangle (`sdp_star::hub_pairs`).
+- Multipliers enter the Lagrangian with a plus sign: the dual slacks are $S_i = C_i + \sum_j y_{ij} A_{ij} + \sum_k z_{ik} E_k$ (where $E_k$ selects hub entry $k$), the hub multipliers balance as $\sum_i z_i = F^\top v$, and the dual objective is $-\sum_{ij} b_{ij} y_{ij} - \sum_k f_k v_k$.
 
 The `Solution` holds the primal blocks, the dual slacks and all multipliers, the primal and dual objectives and infeasibilities, the iteration count, and the local constraints that were removed as linearly dependent.
 
